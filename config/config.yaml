@@ -1,0 +1,35 @@
+exchanges:
+  binance:
+    base_url: "https://fapi.binance.com"
+    rate_limit_per_minute: 1200
+    enabled: true
+
+universe:
+  top_n: 100
+  update_frequency_hours: 24
+  storage_path: "data/universe.parquet"
+
+factor_weights:
+  momentum: 0.25
+  mean_reversion: 0.25
+  carry: 0.3
+  volume: 0.2
+
+thresholds:
+  outlier_z_score: 2.0
+  top_n_outliers: 10
+  bottom_n_outliers: 10
+  min_data_points: 24
+
+database:
+  type: "duckdb"
+  path: "data/crypto_data.duckdb"
+
+telegram:
+  enabled: True  # Set to true to enable Telegram notifications
+  bot_token: "7253631111:AAGBm-rrIBHEdM4tDIevmtG_hJ98bvJGrTs"  # Or set TELEGRAM_BOT_TOKEN env variable
+  chat_id: "-1003287426681"  # Or set TELEGRAM_CHAT_ID env variable
+
+pipeline_frequency_minutes: 60
+data_retention_days: 30
+

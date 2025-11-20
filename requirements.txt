@@ -1,0 +1,33 @@
+# Requirements file for Crypto Outlier Detection Dashboard
+
+# Core dependencies
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# Data storage
+duckdb>=0.9.0
+
+# Exchange adapters
+# (Binance API is public, no SDK needed)
+
+# API Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Dashboard
+streamlit>=1.28.0
+plotly>=5.17.0
+
+# Data formats
+pyarrow>=14.0.0  # For parquet support
+
+# HTTP client
+httpx>=0.25.0  # For async requests if needed
+
+# Optional: for better rate limiting
+ratelimit>=2.2.1
+
+# Telegram notifications (requests is already included above)
