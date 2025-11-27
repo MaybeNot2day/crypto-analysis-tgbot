@@ -93,9 +93,10 @@ try:
             outliers = fetch_data("/api/outliers?limit=20")
             if outliers:
                 df_outliers = pd.DataFrame(outliers)
-                # Include volume metrics in outliers display
-                outlier_cols = ["symbol", "composite_score", "momentum_24h", "mean_reversion_zscore", 
-                               "carry_funding_annualized", "volume_anomaly_zscore", "volume_price_divergence", "outlier_type"]
+                # Include new metrics in outliers display
+                outlier_cols = ["symbol", "composite_score", "momentum_24h", "ema_signal", "macd_signal",
+                               "mean_reversion_zscore", "carry_funding_annualized", "volume_anomaly_zscore",
+                               "oi_change_24h", "btc_correlation", "outlier_type"]
                 available_cols = [col for col in outlier_cols if col in df_outliers.columns]
                 st.dataframe(df_outliers[available_cols].head(10), width='stretch')
             
@@ -241,7 +242,47 @@ try:
                     labels={"composite_score": "Composite Score", "momentum_24h": "Momentum (24h)"},
                 )
                 st.plotly_chart(fig, width='stretch')
-            
+
+            # BTC Correlation Analysis
+            st.header("🔗 BTC Correlation & Open Interest")
+            col1, col2 = st.columns(2)
+
+            with col1:
+                # BTC Beta vs Momentum
+                if "btc_beta" in df_latest.columns and "momentum_24h" in df_latest.columns:
+                    df_btc = df_latest.dropna(subset=["btc_beta", "momentum_24h"])
+                    fig = px.scatter(
+                        df_btc,
+                        x="btc_beta",
+                        y="momentum_24h",
+                        hover_data=["symbol", "btc_correlation"],
+                        title="BTC Beta vs Price Momentum",
+                        labels={"btc_beta": "BTC Beta", "momentum_24h": "Price Momentum (24h)"},
+                        color="btc_correlation",
+                        color_continuous_scale="RdYlGn",
+                    )
+                    fig.add_vline(x=1.0, line_dash="dash", line_color="gray", annotation_text="Beta = 1")
+                    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+                    st.plotly_chart(fig, width='stretch')
+
+            with col2:
+                # OI Change vs Price Momentum
+                if "oi_change_24h" in df_latest.columns and "momentum_24h" in df_latest.columns:
+                    df_oi_change = df_latest.dropna(subset=["oi_change_24h", "momentum_24h"])
+                    fig = px.scatter(
+                        df_oi_change,
+                        x="oi_change_24h",
+                        y="momentum_24h",
+                        hover_data=["symbol", "funding_rate_apr"],
+                        title="OI Change (24h) vs Price Momentum",
+                        labels={"oi_change_24h": "OI Change (%)", "momentum_24h": "Price Momentum (24h)"},
+                        color="funding_rate_apr",
+                        color_continuous_scale="Viridis",
+                    )
+                    fig.add_vline(x=0, line_dash="dash", line_color="gray")
+                    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+                    st.plotly_chart(fig, width='stretch')
+
             # Detailed table
             st.header("📊 Detailed Factor Scores")
             st.dataframe(df_latest, width='stretch')

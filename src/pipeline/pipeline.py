@@ -134,7 +134,16 @@ class Pipeline:
             
             # Use a single timestamp for all factor scores in this batch
             batch_timestamp = now_utc4()
-            
+
+            # Fetch BTC candles for correlation calculation
+            btc_candles_df = self.storage.get_candle_data(
+                symbol="BTCUSDT",
+                interval="1h",
+                limit=24,
+            )
+            if btc_candles_df.empty:
+                logger.warning("No BTC candle data available for correlation calculation")
+
             factor_scores = []
             processed_count = 0
             skipped_count = 0
@@ -186,7 +195,16 @@ class Pipeline:
                         index_price=market_data.iloc[0].get("index_price"),
                     )
                     volume = self.factor_calculator.calculate_volume_factors(candles_df)
-                    
+
+                    # Calculate OI factors
+                    oi_factors = self.factor_calculator.calculate_oi_factors(candles_df)
+
+                    # Calculate BTC correlation (skip for BTC itself)
+                    if symbol != "BTCUSDT" and not btc_candles_df.empty:
+                        btc_corr = self.factor_calculator.calculate_btc_correlation(candles_df, btc_candles_df)
+                    else:
+                        btc_corr = {"btc_correlation": None, "btc_beta": None}
+
                     composite_score = self.factor_calculator.calculate_composite_score(
                         momentum, mean_reversion, carry, volume, volatility
                     )
@@ -206,6 +224,7 @@ class Pipeline:
                         "momentum_percentile": momentum.get("momentum_percentile"),
                         "macd_signal": momentum.get("macd_signal"),
                         "trend_strength": momentum.get("trend_strength"),
+                        "ema_signal": momentum.get("ema_signal"),
                         "mean_reversion_zscore": mean_reversion.get("mean_reversion_zscore"),
                         "rsi": mean_reversion.get("rsi"),
                         "bb_position": mean_reversion.get("bb_position"),
@@ -218,6 +237,11 @@ class Pipeline:
                         "volume_anomaly_zscore": volume.get("volume_anomaly_zscore"),
                         "volume_percentile": volume.get("volume_percentile"),
                         "volume_price_divergence": volume.get("volume_price_divergence"),
+                        "oi_change_1h": oi_factors.get("oi_change_1h"),
+                        "oi_change_4h": oi_factors.get("oi_change_4h"),
+                        "oi_change_24h": oi_factors.get("oi_change_24h"),
+                        "btc_correlation": btc_corr.get("btc_correlation"),
+                        "btc_beta": btc_corr.get("btc_beta"),
                         "open_interest": market_data.iloc[0].get("open_interest"),
                         "funding_rate": funding_rate,
                         "funding_rate_apr": funding_rate_apr,

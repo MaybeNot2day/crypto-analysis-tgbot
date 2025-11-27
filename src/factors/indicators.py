@@ -132,11 +132,11 @@ def calculate_atr(
 def calculate_rsi(prices: np.ndarray, period: int = 14) -> np.ndarray:
     """
     Calculate Relative Strength Index (RSI).
-    
+
     Args:
         prices: Array of prices
         period: RSI period
-        
+
     Returns:
         RSI array
     """
@@ -146,19 +146,59 @@ def calculate_rsi(prices: np.ndarray, period: int = 14) -> np.ndarray:
     deltas = np.diff(prices)
     gains = np.where(deltas > 0, deltas, 0)
     losses = np.where(deltas < 0, -deltas, 0)
-    
+
     # Use pandas ewm for Wilder's smoothing which is standard for RSI
     avg_gain = pd.Series(gains).ewm(alpha=1/period, adjust=False).mean().values
     avg_loss = pd.Series(losses).ewm(alpha=1/period, adjust=False).mean().values
-    
+
     # Pad with NaN for the first element lost in diff
     avg_gain = np.insert(avg_gain, 0, np.nan)
     avg_loss = np.insert(avg_loss, 0, np.nan)
-    
+
     rs = np.divide(avg_gain, avg_loss, out=np.zeros_like(avg_gain), where=avg_loss != 0)
     rsi = 100 - (100 / (1 + rs))
-    
+
     # Handle division by zero (perfect gain)
     rsi[avg_loss == 0] = 100
-    
+
     return rsi
+
+
+def calculate_ema_crossover(
+    prices: np.ndarray,
+    fast_period: int = 9,
+    slow_period: int = 21
+) -> Tuple[np.ndarray, np.ndarray, int]:
+    """
+    Calculate EMA crossover signal.
+
+    Args:
+        prices: Array of prices
+        fast_period: Fast EMA period (default 9)
+        slow_period: Slow EMA period (default 21)
+
+    Returns:
+        Tuple of (fast_ema, slow_ema, signal)
+        signal: 1 (bullish crossover), -1 (bearish crossover), 0 (no clear signal)
+    """
+    if len(prices) < slow_period:
+        return (
+            np.full_like(prices, np.nan),
+            np.full_like(prices, np.nan),
+            0
+        )
+
+    fast_ema = calculate_ema(prices, fast_period)
+    slow_ema = calculate_ema(prices, slow_period)
+
+    # Determine signal from current position and recent crossover
+    if np.isnan(fast_ema[-1]) or np.isnan(slow_ema[-1]):
+        signal = 0
+    elif fast_ema[-1] > slow_ema[-1]:
+        signal = 1  # Bullish
+    elif fast_ema[-1] < slow_ema[-1]:
+        signal = -1  # Bearish
+    else:
+        signal = 0
+
+    return fast_ema, slow_ema, signal

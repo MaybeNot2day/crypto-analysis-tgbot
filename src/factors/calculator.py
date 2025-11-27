@@ -9,10 +9,11 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from src.config import Config, load_config
 from src.factors.indicators import (
-    calculate_macd, 
-    calculate_bollinger_bands, 
-    calculate_atr, 
-    calculate_rsi
+    calculate_macd,
+    calculate_bollinger_bands,
+    calculate_atr,
+    calculate_rsi,
+    calculate_ema_crossover
 )
 
 logger = logging.getLogger(__name__)
@@ -32,12 +33,12 @@ class FactorCalculator:
         periods: List[int] = [1, 4, 24],
     ) -> Dict[str, float]:
         """
-        Calculate momentum factors including MACD.
-        
+        Calculate momentum factors including MACD and EMA crossover.
+
         Args:
             candles: DataFrame with OHLCV data sorted by timestamp
             periods: List of periods (in hours) for momentum calculation
-            
+
         Returns:
             Dictionary with momentum metrics
         """
@@ -49,11 +50,12 @@ class FactorCalculator:
                 "momentum_percentile": None,
                 "macd_signal": None,
                 "trend_strength": None,
+                "ema_signal": None,
             }
 
         candles = candles.sort_values("timestamp")
         closes = candles["close"].values
-        
+
         # Calculate returns for different periods
         momentum_scores = {}
         for period in periods:
@@ -91,6 +93,10 @@ class FactorCalculator:
         else:
             momentum_scores["macd_signal"] = 0.0
             momentum_scores["trend_strength"] = 0.0
+
+        # Calculate EMA Crossover (9/21)
+        fast_ema, slow_ema, ema_signal = calculate_ema_crossover(closes, fast_period=9, slow_period=21)
+        momentum_scores["ema_signal"] = float(ema_signal)
 
         return momentum_scores
 
@@ -316,6 +322,118 @@ class FactorCalculator:
             "volume_anomaly_zscore": volume_anomaly_zscore,
             "volume_percentile": volume_percentile,
             "volume_price_divergence": volume_price_divergence,
+        }
+
+    def calculate_oi_factors(
+        self,
+        candles: pd.DataFrame,
+        periods: List[int] = [1, 4, 24],
+    ) -> Dict[str, float]:
+        """
+        Calculate Open Interest rate of change factors.
+
+        Args:
+            candles: DataFrame with OHLCV + open_interest data sorted by timestamp
+            periods: List of periods (in hours) for OI change calculation
+
+        Returns:
+            Dictionary with OI metrics
+        """
+        if "open_interest" not in candles.columns or len(candles) < max(periods):
+            return {
+                "oi_change_1h": None,
+                "oi_change_4h": None,
+                "oi_change_24h": None,
+            }
+
+        candles = candles.sort_values("timestamp")
+        oi_values = candles["open_interest"].values
+
+        # Calculate OI rate of change for different periods
+        oi_factors = {}
+        for period in periods:
+            if len(oi_values) >= period + 1:
+                current_oi = oi_values[-1]
+                past_oi = oi_values[-(period + 1)]
+                if past_oi > 0 and not np.isnan(current_oi) and not np.isnan(past_oi):
+                    oi_change_pct = (current_oi / past_oi - 1) * 100
+                    oi_factors[f"oi_change_{period}h"] = oi_change_pct
+                else:
+                    oi_factors[f"oi_change_{period}h"] = None
+            else:
+                oi_factors[f"oi_change_{period}h"] = None
+
+        return oi_factors
+
+    def calculate_btc_correlation(
+        self,
+        asset_candles: pd.DataFrame,
+        btc_candles: pd.DataFrame,
+        lookback_periods: int = 24,
+    ) -> Dict[str, float]:
+        """
+        Calculate correlation and beta relative to BTC.
+
+        Args:
+            asset_candles: DataFrame with asset OHLCV data
+            btc_candles: DataFrame with BTC OHLCV data
+            lookback_periods: Number of periods for correlation calculation
+
+        Returns:
+            Dictionary with correlation metrics
+        """
+        if len(asset_candles) < lookback_periods or len(btc_candles) < lookback_periods:
+            return {
+                "btc_correlation": None,
+                "btc_beta": None,
+            }
+
+        # Align timestamps
+        asset_candles = asset_candles.sort_values("timestamp")
+        btc_candles = btc_candles.sort_values("timestamp")
+
+        # Get the last N periods
+        asset_closes = asset_candles["close"].tail(lookback_periods).values
+        btc_closes = btc_candles["close"].tail(lookback_periods).values
+
+        # Need same length
+        min_len = min(len(asset_closes), len(btc_closes))
+        if min_len < 2:
+            return {
+                "btc_correlation": None,
+                "btc_beta": None,
+            }
+
+        asset_closes = asset_closes[-min_len:]
+        btc_closes = btc_closes[-min_len:]
+
+        # Calculate returns
+        asset_returns = np.diff(asset_closes) / asset_closes[:-1]
+        btc_returns = np.diff(btc_closes) / btc_closes[:-1]
+
+        if len(asset_returns) < 2:
+            return {
+                "btc_correlation": None,
+                "btc_beta": None,
+            }
+
+        # Calculate correlation
+        correlation = np.corrcoef(asset_returns, btc_returns)[0, 1]
+        if np.isnan(correlation):
+            correlation = 0.0
+
+        # Calculate beta (covariance / variance)
+        covariance = np.cov(asset_returns, btc_returns)[0, 1]
+        btc_variance = np.var(btc_returns)
+
+        if btc_variance > 0:
+            beta = covariance / btc_variance
+        else:
+            beta = 1.0
+
+        return {
+            "btc_correlation": correlation,
+            "btc_beta": beta,
         }
 
     def normalize_to_btc(self, price: float, btc_price: float) -> float:

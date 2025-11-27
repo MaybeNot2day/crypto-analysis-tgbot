@@ -140,23 +140,37 @@ class DataStorage:
         logger.info("Database schema initialized")
 
     def _migrate_schema(self):
-        """Migrate schema to add volume columns if they don't exist."""
+        """Migrate schema to add missing columns if they don't exist."""
         try:
-            # Check if volume columns exist
+            # Check if columns exist
             columns_result = self.conn.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
+                SELECT column_name
+                FROM information_schema.columns
                 WHERE table_name = 'factor_scores'
             """).df()
-            
+
             existing_columns = set(columns_result["column_name"].tolist()) if not columns_result.empty else set()
-            volume_columns = {
+
+            # Define all columns that should exist
+            required_columns = {
+                # Volume factors
                 "volume_momentum_1h", "volume_momentum_4h", "volume_momentum_24h",
-                "volume_anomaly_zscore", "volume_percentile", "volume_price_divergence"
+                "volume_anomaly_zscore", "volume_percentile", "volume_price_divergence",
+                # Momentum indicators
+                "macd_signal", "trend_strength", "ema_signal",
+                # Mean reversion
+                "bb_position",
+                # Volatility
+                "volatility_atr_pct",
+                # Open Interest factors
+                "oi_change_1h", "oi_change_4h", "oi_change_24h",
+                "open_interest", "funding_rate", "funding_rate_apr",
+                # BTC correlation
+                "btc_correlation", "btc_beta"
             }
-            
-            # Add missing volume columns
-            for col in volume_columns:
+
+            # Add missing columns
+            for col in required_columns:
                 if col not in existing_columns:
                     self.conn.execute(f"ALTER TABLE factor_scores ADD COLUMN {col} DOUBLE")
                     logger.info(f"Added column {col} to factor_scores table")
@@ -164,8 +178,16 @@ class DataStorage:
             # If information_schema is not available (older DuckDB), try direct ALTER
             # DuckDB will ignore if column already exists
             try:
-                for col in ["volume_momentum_1h", "volume_momentum_4h", "volume_momentum_24h",
-                           "volume_anomaly_zscore", "volume_percentile", "volume_price_divergence"]:
+                all_columns = [
+                    "volume_momentum_1h", "volume_momentum_4h", "volume_momentum_24h",
+                    "volume_anomaly_zscore", "volume_percentile", "volume_price_divergence",
+                    "macd_signal", "trend_strength", "ema_signal",
+                    "bb_position", "volatility_atr_pct",
+                    "oi_change_1h", "oi_change_4h", "oi_change_24h",
+                    "open_interest", "funding_rate", "funding_rate_apr",
+                    "btc_correlation", "btc_beta"
+                ]
+                for col in all_columns:
                     self.conn.execute(f"ALTER TABLE factor_scores ADD COLUMN IF NOT EXISTS {col} DOUBLE")
             except Exception as migration_error:
                 logger.warning(f"Schema migration warning: {migration_error}")

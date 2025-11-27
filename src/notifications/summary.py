@@ -235,35 +235,97 @@ class MarketSummaryGenerator:
         """Identify top opportunities based on multiple factors."""
         if scores_df.empty:
             return "No opportunities identified."
-        
-        opportunities = []
-        
-        # 1. Strong Trend (MACD + Momentum)
+
+        long_opportunities = []
+        short_opportunities = []
+
+        # LONG OPPORTUNITIES
+        # 1. Strong Bullish Trend (MACD + Momentum + EMA)
         if "macd_signal" in scores_df.columns and "momentum_24h" in scores_df.columns:
             trend_opps = scores_df[
-                (scores_df["macd_signal"] == 1) & 
+                (scores_df["macd_signal"] == 1) &
                 (scores_df["momentum_24h"] > 3) &
-                (scores_df["rsi"] < 70) # Not overbought yet
+                (scores_df["rsi"] < 70)  # Not overbought yet
             ].sort_values("composite_score", ascending=False).head(2)
-            
+
             for _, row in trend_opps.iterrows():
                 symbol = row.get("symbol", "N/A")
-                opportunities.append(f"  • {symbol}: Strong Trend \\(MACD Bull \\+ Mom\\)")
+                ema_signal = row.get("ema_signal", 0)
+                ema_str = " \\+ EMA" if ema_signal == 1 else ""
+                long_opportunities.append(f"  • {symbol}: Strong Trend \\(MACD Bull{ema_str}\\)")
 
-        # 2. Mean Reversion (RSI + BB)
+        # 2. Oversold Bounce (RSI + BB)
         if "rsi" in scores_df.columns and "bb_position" in scores_df.columns:
-            # Oversold bounce candidates
             oversold = scores_df[
-                (scores_df["rsi"] < 30) & 
+                (scores_df["rsi"] < 30) &
                 (scores_df["bb_position"] < -0.9)
             ].sort_values("rsi").head(2)
-            
+
             for _, row in oversold.iterrows():
                 symbol = row.get("symbol", "N/A")
                 rsi = row.get("rsi", 0)
-                opportunities.append(f"  • {symbol}: Oversold \\(RSI {rsi:.0f} \\+ Lower BB\\)")
+                long_opportunities.append(f"  • {symbol}: Oversold \\(RSI {rsi:.0f} \\+ Lower BB\\)")
 
-        if opportunities:
-            return "\n".join(opportunities)
+        # SHORT OPPORTUNITIES
+        # 1. Overbought with Bearish Signals (RSI + BB + MACD/EMA)
+        if "rsi" in scores_df.columns and "bb_position" in scores_df.columns:
+            overbought = scores_df[
+                (scores_df["rsi"] > 70) &
+                (scores_df["bb_position"] > 0.9)
+            ].sort_values("rsi", ascending=False).head(2)
+
+            for _, row in overbought.iterrows():
+                symbol = row.get("symbol", "N/A")
+                rsi = row.get("rsi", 0)
+                macd_signal = row.get("macd_signal", 0)
+                ema_signal = row.get("ema_signal", 0)
+
+                signals = []
+                if macd_signal == -1:
+                    signals.append("MACD Bear")
+                if ema_signal == -1:
+                    signals.append("EMA Bear")
+
+                signal_str = " \\+ " + "/".join(signals) if signals else ""
+                short_opportunities.append(f"  • {symbol}: Overbought \\(RSI {rsi:.0f}{signal_str}\\)")
+
+        # 2. Negative Carry Shorts (Negative Funding + Downtrend)
+        if "funding_rate_apr" in scores_df.columns and "momentum_24h" in scores_df.columns:
+            negative_carry = scores_df[
+                (scores_df["funding_rate_apr"] < -10) &  # Negative funding > 10% APR
+                (scores_df["momentum_24h"] < 0)  # Downtrend
+            ].sort_values("funding_rate_apr").head(2)
+
+            for _, row in negative_carry.iterrows():
+                symbol = row.get("symbol", "N/A")
+                funding_apr = row.get("funding_rate_apr", 0)
+                short_opportunities.append(f"  • {symbol}: Negative Carry \\(Funding {funding_apr:.1f}% APR\\)")
+
+        # 3. Volume Divergence (Price Rising, Volume Declining)
+        if "volume_price_divergence" in scores_df.columns and "momentum_24h" in scores_df.columns:
+            divergence = scores_df[
+                (scores_df["volume_price_divergence"] > 0.5) &  # Strong divergence
+                (scores_df["momentum_24h"] > 0) &  # Price rising
+                (scores_df["rsi"] > 65)  # Already extended
+            ].sort_values("volume_price_divergence", ascending=False).head(2)
+
+            for _, row in divergence.iterrows():
+                symbol = row.get("symbol", "N/A")
+                short_opportunities.append(f"  • {symbol}: Volume Divergence \\(Weak Rally\\)")
+
+        # Format output
+        output_parts = []
+
+        if long_opportunities:
+            output_parts.append("🟢 *Long Opportunities:*")
+            output_parts.extend(long_opportunities)
         else:
-            return "No specific opportunities identified at this time."
+            output_parts.append("🟢 *Long Opportunities:* None at this time")
+
+        if short_opportunities:
+            output_parts.append("\n🔴 *Short Opportunities:*")
+            output_parts.extend(short_opportunities)
+        else:
+            output_parts.append("\n🔴 *Short Opportunities:* None at this time")
+
+        return "\n".join(output_parts) if output_parts else "No specific opportunities identified at this time."
