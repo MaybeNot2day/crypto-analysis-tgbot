@@ -191,6 +191,10 @@ class Pipeline:
                         momentum, mean_reversion, carry, volume, volatility
                     )
                     
+                    # Calculate APR for funding rate
+                    funding_rate = market_data.iloc[0].get("funding_rate")
+                    funding_rate_apr = funding_rate * 3 * 365 * 100 if funding_rate else 0
+                    
                     score_dict = {
                         "timestamp": batch_timestamp,  # Use consistent timestamp for all scores
                         "exchange": asset["exchange"],
@@ -214,6 +218,9 @@ class Pipeline:
                         "volume_anomaly_zscore": volume.get("volume_anomaly_zscore"),
                         "volume_percentile": volume.get("volume_percentile"),
                         "volume_price_divergence": volume.get("volume_price_divergence"),
+                        "open_interest": market_data.iloc[0].get("open_interest"),
+                        "funding_rate": funding_rate,
+                        "funding_rate_apr": funding_rate_apr,
                         "composite_score": composite_score,
                         "is_outlier": False,
                         "outlier_type": None,
@@ -316,4 +323,3 @@ class Pipeline:
             logger.debug(f"Summary logged to {summary_log_file}")
         except Exception as e:
             logger.warning(f"Failed to log summary to file: {e}")
-

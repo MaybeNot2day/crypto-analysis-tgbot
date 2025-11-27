@@ -130,6 +130,49 @@ try:
                     )
                     st.plotly_chart(fig, width='stretch')
             
+            # Funding and OI Analysis
+            st.header("💸 Funding & Open Interest")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Funding APR vs Momentum Scatter
+                if "funding_rate_apr" in df_latest.columns and "momentum_24h" in df_latest.columns:
+                    df_funding = df_latest.dropna(subset=["funding_rate_apr", "momentum_24h"])
+                    fig = px.scatter(
+                        df_funding,
+                        x="funding_rate_apr",
+                        y="momentum_24h",
+                        hover_data=["symbol", "composite_score"],
+                        title="Funding APR vs Price Momentum",
+                        labels={"funding_rate_apr": "Funding APR %", "momentum_24h": "Price Momentum (24h)"},
+                        color="composite_score",
+                        color_continuous_scale="RdBu",
+                    )
+                    # Add reference lines
+                    fig.add_vline(x=0, line_dash="dash", line_color="gray")
+                    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+                    st.plotly_chart(fig, width='stretch')
+
+            with col2:
+                # Open Interest vs Momentum Scatter
+                # Note: Using raw OI for now. Ideally we want OI Z-Score.
+                if "open_interest" in df_latest.columns and "momentum_24h" in df_latest.columns:
+                    df_oi = df_latest.dropna(subset=["open_interest", "momentum_24h"])
+                    # Log scale for OI often helps visualization
+                    fig = px.scatter(
+                        df_oi,
+                        x="open_interest",
+                        y="momentum_24h",
+                        hover_data=["symbol", "funding_rate_apr"],
+                        title="Open Interest vs Price Momentum",
+                        labels={"open_interest": "Open Interest (Raw)", "momentum_24h": "Price Momentum (24h)"},
+                        color="funding_rate_apr",
+                        color_continuous_scale="Viridis",
+                        log_x=True,
+                    )
+                    fig.add_hline(y=0, line_dash="dash", line_color="gray")
+                    st.plotly_chart(fig, width='stretch')
+
             # Volume analysis section
             st.header("📊 Volume Analysis")
             
@@ -211,4 +254,3 @@ try:
 except Exception as e:
     st.error(f"Error loading dashboard: {e}")
     logger.error(f"Dashboard error: {e}", exc_info=True)
-
