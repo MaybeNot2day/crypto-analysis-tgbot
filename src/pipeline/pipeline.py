@@ -199,11 +199,9 @@ class Pipeline:
                     # Calculate OI factors
                     oi_factors = self.factor_calculator.calculate_oi_factors(candles_df)
 
-                    # Calculate BTC correlation (skip for BTC itself)
-                    if symbol != "BTCUSDT" and not btc_candles_df.empty:
-                        btc_corr = self.factor_calculator.calculate_btc_correlation(candles_df, btc_candles_df)
-                    else:
-                        btc_corr = {"btc_correlation": None, "btc_beta": None}
+                    # Skip BTC correlation in first pass (calculate later for top assets only)
+                    # This saves memory by not loading BTC candles for all 81 assets
+                    btc_corr = {"btc_correlation": None, "btc_beta": None}
 
                     composite_score = self.factor_calculator.calculate_composite_score(
                         momentum, mean_reversion, carry, volume, volatility
@@ -260,7 +258,50 @@ class Pipeline:
                     continue
             
             logger.info(f"Factor calculation complete: {processed_count} processed, {skipped_count} skipped out of {len(universe_df)} total assets")
-            
+
+            # Step 5b: Calculate BTC correlation for top assets only (memory optimization)
+            logger.info("Step 5b: Calculating BTC correlation for top/bottom assets")
+            if factor_scores and not btc_candles_df.empty:
+                try:
+                    # Sort by composite score to find top/bottom assets
+                    sorted_scores = sorted(
+                        [s for s in factor_scores if s.get("composite_score") is not None],
+                        key=lambda x: x["composite_score"],
+                        reverse=True
+                    )
+
+                    # Take top 15 and bottom 15 (30 total instead of all 81)
+                    top_assets = sorted_scores[:15]
+                    bottom_assets = sorted_scores[-15:]
+                    selected_assets = top_assets + bottom_assets
+
+                    btc_corr_count = 0
+                    for score_dict in selected_assets:
+                        symbol = score_dict.get("symbol")
+                        if symbol and symbol != "BTCUSDT":
+                            try:
+                                # Get candles for this asset
+                                asset_candles = self.storage.get_candle_data(
+                                    symbol=symbol,
+                                    interval="1h",
+                                    limit=24,
+                                )
+                                if not asset_candles.empty:
+                                    btc_corr = self.factor_calculator.calculate_btc_correlation(
+                                        asset_candles, btc_candles_df
+                                    )
+                                    # Update the score_dict in place
+                                    score_dict["btc_correlation"] = btc_corr.get("btc_correlation")
+                                    score_dict["btc_beta"] = btc_corr.get("btc_beta")
+                                    btc_corr_count += 1
+                            except Exception as e:
+                                logger.warning(f"Error calculating BTC correlation for {symbol}: {e}")
+                                continue
+
+                    logger.info(f"Calculated BTC correlation for {btc_corr_count} top/bottom assets (out of {len(factor_scores)} total)")
+                except Exception as e:
+                    logger.error(f"Error in BTC correlation second pass: {e}")
+
             # Step 6: Identify outliers
             logger.info("Step 6: Identifying outliers")
             if factor_scores:
