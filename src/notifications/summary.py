@@ -190,23 +190,34 @@ class MarketSummaryGenerator:
             macd_signal = row.get("macd_signal", 0)
             bb_pos = row.get("bb_position", 0)
             rsi = row.get("rsi", 50)
-            
+            btc_beta = row.get("btc_beta")
+            btc_corr = row.get("btc_correlation")
+
             notes = []
             if macd_signal == 1:
                 notes.append("MACD Bull")
             elif macd_signal == -1:
                 notes.append("MACD Bear")
-                
+
             if bb_pos > 0.8:
                 notes.append("Upper BB")
             elif bb_pos < -0.8:
                 notes.append("Lower BB")
-                
+
             if rsi > 70:
                 notes.append(f"RSI {rsi:.0f}")
             elif rsi < 30:
                 notes.append(f"RSI {rsi:.0f}")
-                
+
+            # Add BTC correlation info (only if calculated)
+            if btc_beta is not None and not pd.isna(btc_beta):
+                if abs(btc_beta) < 0.5:
+                    notes.append(f"β {btc_beta:.1f} ⚡Low BTC correlation")
+                elif btc_beta > 1.5:
+                    notes.append(f"β {btc_beta:.1f} ⬆️High volatility")
+                elif btc_beta < -0.3:
+                    notes.append(f"β {btc_beta:.1f} ⬇️Inverse to BTC")
+
             return ", ".join(notes) if notes else ""
 
         if not top_outliers.empty:
@@ -265,6 +276,20 @@ class MarketSummaryGenerator:
                 symbol = row.get("symbol", "N/A")
                 rsi = row.get("rsi", 0)
                 long_opportunities.append(f"  • {symbol}: Oversold \\(RSI {rsi:.0f} \\+ Lower BB\\)")
+
+        # 3. Low BTC Correlation Alpha (Decoupled from BTC + Strong momentum)
+        if "btc_beta" in scores_df.columns and "momentum_24h" in scores_df.columns:
+            low_corr_alpha = scores_df[
+                (scores_df["btc_beta"].notna()) &
+                (scores_df["btc_beta"].abs() < 0.5) &  # Low correlation with BTC
+                (scores_df["momentum_24h"] > 5) &  # Strong uptrend
+                (scores_df["rsi"] < 70)  # Not overbought
+            ].sort_values("momentum_24h", ascending=False).head(2)
+
+            for _, row in low_corr_alpha.iterrows():
+                symbol = row.get("symbol", "N/A")
+                btc_beta = row.get("btc_beta", 0)
+                long_opportunities.append(f"  • {symbol}: Alpha Play \\(β {btc_beta:.2f}, Decoupled from BTC\\)")
 
         # SHORT OPPORTUNITIES
         # 1. Overbought with Bearish Signals (RSI + BB + MACD/EMA)
