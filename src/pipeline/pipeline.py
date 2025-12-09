@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 import pandas as pd
+import gc
 from src.config import Config, load_config
 from src.universe.builder import UniverseBuilder
 from src.adapters.binance import BinanceAdapter
@@ -51,6 +52,7 @@ class Pipeline:
             # Step 1: Update universe if needed
             logger.info("Step 1: Updating universe")
             universe_df = self.universe_builder.update_universe_if_needed()
+            gc.collect()  # Cleanup after universe update
             
             # Step 2: Fetch market data for all symbols
             logger.info("Step 2: Fetching market data")
@@ -87,6 +89,8 @@ class Pipeline:
             # Step 3: Save market data
             logger.info(f"Step 3: Saving {len(market_data_snapshots)} market data snapshots")
             self.storage.save_market_data(market_data_snapshots)
+            del market_data_snapshots  # Free memory
+            gc.collect()
             
             # Step 4: Fetch and save candle data
             logger.info("Step 4: Fetching candle data")
@@ -117,9 +121,12 @@ class Pipeline:
                     if candles:
                         self.storage.save_candle_data(candles, interval="1h")
                         logger.debug(f"Saved {len(candles)} candles for {symbol}")
+                        del candles  # Free memory per iteration
                 except Exception as e:
                     logger.error(f"Error fetching candles for {symbol}: {e}")
                     continue
+            
+            gc.collect()  # Cleanup after candle fetching
             
             # Step 5: Calculate factor scores
             logger.info("Step 5: Calculating factor scores")
@@ -134,16 +141,7 @@ class Pipeline:
             
             # Use a single timestamp for all factor scores in this batch
             batch_timestamp = now_utc4()
-
-            # Fetch BTC candles for correlation calculation
-            btc_candles_df = self.storage.get_candle_data(
-                symbol="BTCUSDT",
-                interval="1h",
-                limit=24,
-            )
-            if btc_candles_df.empty:
-                logger.warning("No BTC candle data available for correlation calculation")
-
+            
             factor_scores = []
             processed_count = 0
             skipped_count = 0
@@ -195,14 +193,7 @@ class Pipeline:
                         index_price=market_data.iloc[0].get("index_price"),
                     )
                     volume = self.factor_calculator.calculate_volume_factors(candles_df)
-
-                    # Calculate OI factors
-                    oi_factors = self.factor_calculator.calculate_oi_factors(candles_df)
-
-                    # Skip BTC correlation in first pass (calculate later for top assets only)
-                    # This saves memory by not loading BTC candles for all 81 assets
-                    btc_corr = {"btc_correlation": None, "btc_beta": None}
-
+                    
                     composite_score = self.factor_calculator.calculate_composite_score(
                         momentum, mean_reversion, carry, volume, volatility
                     )
@@ -222,7 +213,6 @@ class Pipeline:
                         "momentum_percentile": momentum.get("momentum_percentile"),
                         "macd_signal": momentum.get("macd_signal"),
                         "trend_strength": momentum.get("trend_strength"),
-                        "ema_signal": momentum.get("ema_signal"),
                         "mean_reversion_zscore": mean_reversion.get("mean_reversion_zscore"),
                         "rsi": mean_reversion.get("rsi"),
                         "bb_position": mean_reversion.get("bb_position"),
@@ -235,11 +225,6 @@ class Pipeline:
                         "volume_anomaly_zscore": volume.get("volume_anomaly_zscore"),
                         "volume_percentile": volume.get("volume_percentile"),
                         "volume_price_divergence": volume.get("volume_price_divergence"),
-                        "oi_change_1h": oi_factors.get("oi_change_1h"),
-                        "oi_change_4h": oi_factors.get("oi_change_4h"),
-                        "oi_change_24h": oi_factors.get("oi_change_24h"),
-                        "btc_correlation": btc_corr.get("btc_correlation"),
-                        "btc_beta": btc_corr.get("btc_beta"),
                         "open_interest": market_data.iloc[0].get("open_interest"),
                         "funding_rate": funding_rate,
                         "funding_rate_apr": funding_rate_apr,
@@ -252,63 +237,68 @@ class Pipeline:
                     processed_count += 1
                     logger.debug(f"Calculated factors for {symbol}")
                     
+                    # Explicitly free memory
+                    del candles_df
+                    del momentum, mean_reversion, volatility, carry, volume
+                    
                 except Exception as e:
                     logger.error(f"Error calculating factors for {symbol}: {e}")
                     skipped_count += 1
                     continue
             
             logger.info(f"Factor calculation complete: {processed_count} processed, {skipped_count} skipped out of {len(universe_df)} total assets")
-
-            # Step 5b: Calculate BTC correlation for top assets only (memory optimization)
-            logger.info("Step 5b: Calculating BTC correlation for top/bottom assets")
-            if factor_scores and not btc_candles_df.empty:
-                try:
-                    # Sort by composite score to find top/bottom assets
-                    sorted_scores = sorted(
-                        [s for s in factor_scores if s.get("composite_score") is not None],
-                        key=lambda x: x["composite_score"],
-                        reverse=True
-                    )
-
-                    # Take top 15 and bottom 15 (30 total instead of all 81)
-                    top_assets = sorted_scores[:15]
-                    bottom_assets = sorted_scores[-15:]
-                    selected_assets = top_assets + bottom_assets
-
-                    btc_corr_count = 0
-                    for score_dict in selected_assets:
-                        symbol = score_dict.get("symbol")
-                        if symbol and symbol != "BTCUSDT":
-                            try:
-                                # Get candles for this asset
-                                asset_candles = self.storage.get_candle_data(
-                                    symbol=symbol,
-                                    interval="1h",
-                                    limit=24,
-                                )
-                                if not asset_candles.empty:
-                                    btc_corr = self.factor_calculator.calculate_btc_correlation(
-                                        asset_candles, btc_candles_df
-                                    )
-                                    # Update the score_dict in place
-                                    score_dict["btc_correlation"] = btc_corr.get("btc_correlation")
-                                    score_dict["btc_beta"] = btc_corr.get("btc_beta")
-                                    btc_corr_count += 1
-                            except Exception as e:
-                                logger.warning(f"Error calculating BTC correlation for {symbol}: {e}")
-                                continue
-
-                    logger.info(f"Calculated BTC correlation for {btc_corr_count} top/bottom assets (out of {len(factor_scores)} total)")
-                except Exception as e:
-                    logger.error(f"Error in BTC correlation second pass: {e}")
-
+            gc.collect()
+            
             # Step 6: Identify outliers
             logger.info("Step 6: Identifying outliers")
             if factor_scores:
                 factor_scores = self.factor_calculator.identify_outliers(factor_scores)
                 self.storage.save_factor_scores(factor_scores)
                 logger.info(f"Calculated and saved {len(factor_scores)} factor scores")
-            
+
+                # Step 6b: Calculate BTC correlation for outliers specifically
+                logger.info("Step 6b: Calculating BTC correlation for outliers")
+                if not btc_candles_df.empty:
+                    try:
+                        # Get all outliers
+                        outlier_symbols = [
+                            score["symbol"] for score in factor_scores
+                            if score.get("is_outlier") and score.get("symbol") != "BTCUSDT"
+                        ]
+
+                        btc_corr_count = 0
+                        for score_dict in factor_scores:
+                            symbol = score_dict.get("symbol")
+                            # Only calculate for outliers if not already calculated
+                            if (symbol in outlier_symbols and
+                                (score_dict.get("btc_correlation") is None or
+                                 pd.isna(score_dict.get("btc_correlation")))):
+                                try:
+                                    # Get candles for this outlier
+                                    asset_candles = self.storage.get_candle_data(
+                                        symbol=symbol,
+                                        interval="1h",
+                                        limit=24,
+                                    )
+                                    if not asset_candles.empty:
+                                        btc_corr = self.factor_calculator.calculate_btc_correlation(
+                                            asset_candles, btc_candles_df
+                                        )
+                                        # Update the score_dict
+                                        score_dict["btc_correlation"] = btc_corr.get("btc_correlation")
+                                        score_dict["btc_beta"] = btc_corr.get("btc_beta")
+                                        btc_corr_count += 1
+                                except Exception as e:
+                                    logger.warning(f"Error calculating BTC correlation for outlier {symbol}: {e}")
+                                    continue
+
+                        # Re-save factor scores with updated BTC correlation for outliers
+                        if btc_corr_count > 0:
+                            self.storage.save_factor_scores(factor_scores)
+                            logger.info(f"Calculated BTC correlation for {btc_corr_count} outliers")
+                    except Exception as e:
+                        logger.error(f"Error in BTC correlation for outliers: {e}")
+
             # Step 7: Generate summary and send Telegram notification (with deduplication)
             logger.info("Step 7: Generating summary and sending notification")
             if factor_scores and self.telegram_bot.is_configured():
@@ -359,6 +349,9 @@ class Pipeline:
             
             elapsed = (now_utc4() - start_time).total_seconds()
             logger.info(f"Pipeline completed successfully in {elapsed:.2f} seconds")
+            
+            # Final cleanup
+            gc.collect()
             
         except Exception as e:
             logger.error(f"Pipeline failed: {e}", exc_info=True)
