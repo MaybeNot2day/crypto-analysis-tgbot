@@ -258,6 +258,12 @@ class Pipeline:
 
                 # Step 6b: Calculate BTC correlation for outliers specifically
                 logger.info("Step 6b: Calculating BTC correlation for outliers")
+                # Fetch BTC candles for correlation calculation
+                btc_candles_df = self.storage.get_candle_data(
+                    symbol="BTCUSDT",
+                    interval="1h",
+                    limit=24,
+                )
                 if not btc_candles_df.empty:
                     try:
                         # Get all outliers
