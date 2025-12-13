@@ -273,7 +273,9 @@ class DataStorage:
             "carry_funding_annualized", "carry_basis",
             "volume_momentum_1h", "volume_momentum_4h", "volume_momentum_24h",
             "volume_anomaly_zscore", "volume_percentile", "volume_price_divergence",
-            "composite_score", "is_outlier", "outlier_type"
+            "composite_score", "is_outlier", "outlier_type",
+            # BTC correlation columns
+            "btc_correlation", "btc_beta"
         ]
         
         # Reorder DataFrame columns to match table schema
